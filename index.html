@@ -22,8 +22,10 @@ main{max-width:1200px;margin:0 auto;padding:24px 20px;}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px;}
 .card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:transform .15s ease,border-color .15s ease;cursor:pointer;}
 .card:hover{transform:translateY(-3px);border-color:var(--accent);}
-.thumb{aspect-ratio:16/9;background:linear-gradient(135deg,var(--accent) 0%,#0d1630 100%);display:flex;align-items:center;justify-content:center;}
-.thumb svg{width:46px;height:46px;opacity:.9;}
+.thumb{aspect-ratio:16/9;background:linear-gradient(135deg,var(--accent) 0%,#0d1630 100%);background-size:cover;background-position:center;position:relative;}
+.thumb .playbtn{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
+.thumb .playbtn .circle{width:48px;height:48px;border-radius:50%;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;}
+.thumb svg{width:22px;height:22px;opacity:.95;}
 .meta{padding:12px 14px;}
 .meta h3{margin:0 0 6px;font-size:15px;line-height:1.3;font-weight:600;word-break:break-word;}
 .meta span{color:var(--muted);font-size:12px;}
@@ -47,7 +49,6 @@ video{width:100%;border-radius:12px;background:#000;border:1px solid var(--borde
 .comment p{margin:4px 0 0;font-size:14px;line-height:1.4;word-break:break-word;}
 .nocomments{color:var(--muted);font-size:14px;}
 .loading{color:var(--muted);padding:60px 20px;text-align:center;}
-footer{text-align:center;color:var(--muted);font-size:12px;padding:30px 0;}
 </style>
 </head>
 <body>
@@ -58,14 +59,13 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:30px 0;}
   </div>
 </header>
 <main id="app"><div class="loading">Ładowanie...</div></main>
-<footer>4filmy — statyczna strona na GitHub Pages</footer>
 
 <script>
 // ====== KONFIGURACJA — zmień na swoje dane ======
 const GITHUB_OWNER  = "FabexDev";     // Twój login na GitHubie
 const GITHUB_REPO   = "4filmy";       // nazwa repozytorium
 const GITHUB_BRANCH = "main";         // gałąź, na której trzymasz pliki
-const VIDEOS_FOLDER = "videos";       // folder w repo z plikami wideo
+const VIDEOS_FOLDER = "";             // puste = filmy leżą w głównym katalogu repo (root gałęzi "main")
 // =================================================
 
 const VIDEO_EXT = ['mp4','webm','mov','m4v','mkv','avi','ogv','ogg','wav'];
@@ -93,7 +93,8 @@ function playIconSvg(){
 }
 
 async function fetchVideos(){
-  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${VIDEOS_FOLDER}?ref=${GITHUB_BRANCH}`;
+  const path = VIDEOS_FOLDER ? `/${VIDEOS_FOLDER}` : '';
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents${path}?ref=${GITHUB_BRANCH}`;
   const res = await fetch(url);
   if(!res.ok){
     throw new Error('Nie udało się pobrać listy plików (' + res.status + ')');
@@ -131,18 +132,56 @@ function renderHome(filterText){
   }
 
   if(videos.length === 0){
-    app.innerHTML = `<div class="empty">${filterText ? 'Brak wyników dla: ' + escapeHtml(filterText) : 'Brak filmów w folderze "' + VIDEOS_FOLDER + '". Wgraj pliki wideo do repozytorium.'}</div>`;
+    const where = VIDEOS_FOLDER ? `folderze "${VIDEOS_FOLDER}"` : 'głównym katalogu repozytorium';
+    app.innerHTML = `<div class="empty">${filterText ? 'Brak wyników dla: ' + escapeHtml(filterText) : 'Brak filmów w ' + where + '. Wgraj pliki wideo do repozytorium.'}</div>`;
     return;
   }
 
-  app.innerHTML = `<div class="grid">${videos.map(v => `
+  app.innerHTML = `<div class="grid">${videos.map((v, i) => `
     <div class="card" onclick="location.hash='#/watch/${encodeURIComponent(v.name)}'">
-      <div class="thumb">${playIconSvg()}</div>
+      <div class="thumb" id="thumb-${i}"><div class="playbtn"><div class="circle">${playIconSvg()}</div></div></div>
       <div class="meta">
         <h3>${escapeHtml(titleFromName(v.name))}</h3>
         <span>${(v.size/1024/1024).toFixed(1)} MB</span>
       </div>
     </div>`).join('')}</div>`;
+
+  videos.forEach((v, i) => {
+    const el = document.getElementById('thumb-' + i);
+    if(el) generateThumbnail(v.url, el);
+  });
+}
+
+function generateThumbnail(url, thumbEl){
+  const vid = document.createElement('video');
+  vid.crossOrigin = 'anonymous';
+  vid.preload = 'metadata';
+  vid.muted = true;
+  vid.playsInline = true;
+  vid.src = url;
+
+  vid.addEventListener('loadedmetadata', () => {
+    if(isFinite(vid.duration) && vid.duration > 0){
+      vid.currentTime = vid.duration / 2;
+    } else {
+      vid.currentTime = 1;
+    }
+  });
+
+  vid.addEventListener('seeked', () => {
+    try{
+      const canvas = document.createElement('canvas');
+      canvas.width = vid.videoWidth;
+      canvas.height = vid.videoHeight;
+      if(canvas.width === 0 || canvas.height === 0) return;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+      thumbEl.style.backgroundImage = `url(${dataUrl})`;
+    }catch(e){
+      // np. film nie wspiera CORS przy odczycie klatki — zostaje gradient
+    }
+  });
 }
 
 function renderWatch(name){
