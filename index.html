@@ -158,9 +158,35 @@ async function fetchVideos(){
     throw new Error('Nie udało się pobrać listy plików (' + res.status + ')');
   }
   const data = await res.json();
-  return data
+  const videos = data
     .filter(item => item.type === 'file' && isMedia(item.name))
-    .map(item => ({ name: item.name, url: item.download_url, size: item.size }));
+    .map(item => ({ name: item.name, url: item.download_url, size: item.size, path: item.path, date: null }));
+
+  // Data publikacji = data ostatniego commita, który dotknął danego pliku
+  await Promise.all(videos.map(async v => {
+    v.date = await fetchVideoDate(v.path);
+  }));
+
+  return videos;
+}
+
+async function fetchVideoDate(filePath){
+  try{
+    const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/commits?path=${encodeURIComponent(filePath)}&sha=${GITHUB_BRANCH}&per_page=1`;
+    const res = await fetch(url);
+    if(!res.ok) return null;
+    const data = await res.json();
+    if(!data.length) return null;
+    const iso = data[0].commit?.committer?.date || data[0].commit?.author?.date;
+    return iso ? new Date(iso) : null;
+  }catch(e){
+    return null;
+  }
+}
+
+function formatDate(date){
+  if(!date) return null;
+  return date.toLocaleDateString('pl-PL', { day:'numeric', month:'long', year:'numeric' });
 }
 
 // ---- localStorage: komentarze i wyświetlenia ----
@@ -207,12 +233,13 @@ function renderHome(filterText){
   app.innerHTML = `<div class="grid">${videos.map((v, i) => {
     const views = getViews(v.name);
     const commCount = getComments(v.name).length;
+    const dateStr = formatDate(v.date);
     return `
     <div class="card" onclick="location.hash='#/watch/${encodeURIComponent(v.name)}'">
       <div class="thumb" id="thumb-${i}"><div class="playbtn"><div class="circle">${playIconSvg()}</div></div></div>
       <div class="meta">
         <h3>${escapeHtml(titleFromName(v.name))}</h3>
-        <span class="size">${(v.size/1024/1024).toFixed(1)} MB</span>
+        <span class="size">${(v.size/1024/1024).toFixed(1)} MB${dateStr ? ' · ' + escapeHtml(dateStr) : ''}</span>
         <div class="stats">
           <span>${eyeIconSvg()} ${views}</span>
           <span>${bubbleIconSvg()} ${commCount}</span>
@@ -306,6 +333,7 @@ function renderWatch(name){
       <div class="subinfo">
         <span>${(video.size/1024/1024).toFixed(1)} MB</span>
         <span>${views} wyświetleń</span>
+        ${formatDate(video.date) ? `<span>Opublikowano: ${escapeHtml(formatDate(video.date))}</span>` : ''}
       </div>
 
       <div class="comments">
